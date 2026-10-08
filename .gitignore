@@ -1,0 +1,51 @@
+# Training/evaluation outputs and local models
+/outputs/
+/checkpoints/
+/models/
+/logs/
+*.safetensors
+*.pt
+*.pth
+*.ckpt
+*.bin
+*.log
+
+# Optional experiment loggers
+/wandb/
+/swanlab_log/
+/tensorboard_log/
+
+# GPQA should be obtained locally under its upstream access terms
+gpqa*.csv
+gpqa*.json
+gpqa*.jsonl
+gpqa*.parquet
+
+# Credentials and machine-local configuration
+.env
+.env.*
+.netrc
+.pypirc
+*.pem
+*.key
+credentials*
+.ssh/
+.aws/
+
+# Build products, editor files and caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.cache/
+.coverage
+htmlcov/
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.idea/
+.vscode/
+.DS_Store
+._*
