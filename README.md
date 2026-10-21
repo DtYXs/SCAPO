@@ -2,6 +2,8 @@
   <h1>Semifactual Credit-Augmented Policy Optimization</h1>
   <p>
     <a href="https://arxiv.org/abs/2609.40360">📖 <b>Paper</b></a>
+    · <a href="https://huggingface.co/DtYXs/SCAPO-Qwen3-4B">🤗 <b>SCAPO-Qwen3-4B</b></a>
+    · <a href="https://huggingface.co/DtYXs/SCAPO-Qwen3-1.7B">🤗 <b>SCAPO-Qwen3-1.7B</b></a>
   </p>
 </div>
 
