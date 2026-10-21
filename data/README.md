@@ -18,25 +18,30 @@ The 19 math evaluation Parquet files contain only `problem` and `answer` columns
 Math sampling counts follow [benchmarks.json](../scripts/evaluation/benchmarks.json).
 
 Use `--benchmark <name>` to select a benchmark from the table below, or `--benchmark gpqa` for GPQA-Diamond.
-Omit `--benchmark` to evaluate all paper benchmarks.
+Omit `--benchmark` to evaluate all math benchmarks and include GPQA-Diamond when its CSV is available.
 
 | Files | Benchmark names (`--benchmark`) | Rows per file |
 | --- | --- | --- |
 | `eval/aime2024.parquet`, `eval/aime2025.parquet`, `eval/aime2026.parquet` | `aime2024`, `aime2025`, `aime2026` | 30 / 30 / 30 |
-| `eval/amc23.parquet`, `eval/amc2024.parquet`, `eval/amc2025.parquet` | `amc23`, `amc2024`, `amc2025` | 40 / 45 / 42 |
-| `eval/hmmt_feb_2025.parquet`, `eval/hmmt_feb_2026.parquet` | `hmmt_feb_2025`, `hmmt_feb_2026` | 30 / 33 |
+| `eval/amc2023.parquet`, `eval/amc2024.parquet`, `eval/amc2025.parquet` | `amc2023`, `amc2024`, `amc2025` | 40 / 45 / 42 |
+| `eval/hmmt2025.parquet`, `eval/hmmt2026.parquet` | `hmmt2025`, `hmmt2026` | 30 / 33 |
 | `eval/brumo_2025.parquet` | `brumo_2025` | 30 |
 | `eval/smt_2025.parquet` | `smt_2025` | 53 |
 | `eval/omni_math_rule.parquet` | `omni_math_rule` | 2,821 |
 | `eval/minerva.parquet` | `minerva` | 272 |
 | `eval/olympiadbench.parquet` | `olympiadbench` | 674 |
-| `eval/noop_aime2024.parquet`, `eval/noop_aime2025.parquet`, `eval/noop_aime2026.parquet` | `noop_aime24`, `noop_aime25`, `noop_aime26` | 30 / 30 / 30 |
+| `eval/noop_aime2024.parquet`, `eval/noop_aime2025.parquet`, `eval/noop_aime2026.parquet` | `noop_aime2024`, `noop_aime2025`, `noop_aime2026` | 30 / 30 / 30 |
 | `eval/thinkbench_aime2024.parquet`, `eval/thinkbench_aime2025.parquet`, `eval/thinkbench_aime2026.parquet` | `thinkbench_aime2024`, `thinkbench_aime2025`, `thinkbench_aime2026` | 120 / 120 / 120 |
 
 ## GPQA-Diamond evaluation
 
 To comply with GPQA's access conditions, we do not include the original questions.
-Please obtain `gpqa_diamond.csv` from the [official GPQA dataset](https://huggingface.co/datasets/Idavidrein/gpqa).
+Download `gpqa_diamond.csv` from the [official GPQA dataset](https://huggingface.co/datasets/Idavidrein/gpqa)
+and place it in `data/eval/` at the repository root:
+
+```text
+data/eval/gpqa_diamond.csv
+```
 
 The evaluator requires 198 questions and these columns: `Question`,
 `Correct Answer`, `Incorrect Answer 1`, `Incorrect Answer 2`, and

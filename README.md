@@ -343,24 +343,33 @@
 
 ## Installation
 
+We recommend using the [official EasyR1 Docker image](https://github.com/hiyouga/EasyR1#software-requirements). Inside the container, clone this repository and install the project:
+
 ```bash
-conda create -n scapo python=3.10 -y
+git clone https://github.com/DtYXs/SCAPO.git
+cd SCAPO
+pip install -e ./EasyR1
+```
+
+Alternatively, you can create your own Conda environment:
+
+```bash
+conda create -n scapo python=3.12 -y
 conda activate scapo
 
 git clone https://github.com/DtYXs/SCAPO.git
 cd SCAPO
-pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cu129
-pip install -e ./EasyR1
+pip install uv
+uv pip install --python "$CONDA_PREFIX/bin/python" torch==2.8.0 torchvision==0.23.0 torchaudio==2.8.0 --index-url https://download.pytorch.org/whl/cu128
+uv pip install --python "$CONDA_PREFIX/bin/python" -e ./EasyR1
 pip install flash-attn==2.8.3 --no-build-isolation
 ```
-
-We recommend the [official EasyR1 Docker image](https://github.com/hiyouga/EasyR1#software-requirements) (PyTorch 2.8.0 / CUDA 12.9 / vLLM 0.11.0).
 
 <a name="data"></a>
 
 ## Data
 
-We train on [DAPO-Math-17K](https://huggingface.co/datasets/BytedTsinghua-SIA/DAPO-Math-17k), paired with our [semifactual prompt dataset](data/train/dapo17k_semifactual.jsonl), which supplies four answer-preserving perturbations per problem. The training data, perturbation prompts, and math evaluation datasets are included in [data/](data/README.md).
+We train on [DAPO-Math-17K](https://huggingface.co/datasets/BytedTsinghua-SIA/DAPO-Math-17k), paired with our [semifactual prompt dataset](data/train/dapo17k_semifactual.jsonl), which supplies four answer-preserving perturbations per problem. The training data, perturbation prompts, and math evaluation datasets are included in the [data directory](data/).
 
 <a name="training"></a>
 
@@ -374,14 +383,7 @@ bash scripts/train.sh scapo 1.7b --model-path Qwen/Qwen3-1.7B-Base --gpus 0,1,2,
 
 Replace `scapo` with `grpo`, `gspo`, `sapo`, `cf_grpo`, or `fipo` to train a baseline.
 
-We run experiments on 8 GPUs, using the settings below.
-
-| Model | Rollout batch size | Training minibatch size | Learning rate | Rollout steps | Optimization steps |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| Qwen3-4B-Base | 128 | 64 | `1e-6` | 300 | 600 |
-| Qwen3-1.7B-Base | 128 | 64 | `1e-6` | 500 | 1,000 |
-
-The final checkpoint is merged automatically after training. To merge a saved checkpoint manually, run the command below.
+We run experiments on 8 GPUs. The final checkpoint will be merged automatically after training. To merge a saved checkpoint manually, run the command below.
 
 <details>
 <summary><b>Merge a saved checkpoint</b></summary>
@@ -396,13 +398,13 @@ python EasyR1/scripts/model_merger.py --local_dir outputs/scapo_4b/global_step_3
 
 ## Evaluation
 
-Evaluate all benchmarks from the paper:
+Evaluate the benchmarks in our paper:
 
 ```bash
 bash scripts/eval.sh \
   --model outputs/scapo_4b/global_step_300/actor/huggingface \
-  --gpqa-file data/eval/gpqa_diamond.csv \
-  --output-dir outputs/eval/scapo_4b
+  --output-dir outputs/eval/scapo_4b \
+  --gpus 0,1,2,3,4,5,6,7
 ```
 
 To evaluate a single benchmark, add `--benchmark`:
@@ -411,7 +413,7 @@ To evaluate a single benchmark, add `--benchmark`:
 bash scripts/eval.sh --model Qwen/Qwen3-4B-Base --benchmark aime2024
 ```
 
-Download `gpqa_diamond.csv` from the [official GPQA dataset](https://huggingface.co/datasets/Idavidrein/gpqa) separately for GPQA evaluation. See [data/README.md](data/README.md) for benchmark names and evaluation details.
+See [data/README.md](data/README.md) for more details.
 
 <a name="acknowledgments"></a>
 

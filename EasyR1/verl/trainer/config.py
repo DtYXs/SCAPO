@@ -79,39 +79,12 @@ class AlgorithmConfig:
     filter_key: str = "overall"
     filter_low: float = 0.01
     filter_high: float = 0.99
-    causal_credit_enabled: bool = False
-    causal_credit_weighting_mode: str = "counterfactual"
-    causal_credit_min_weight: float = 0.5
-    causal_credit_max_weight: float = 4.0
-    causal_credit_answer_weight: float = 1.5
-    causal_credit_max_spans: int = 10
-    causal_credit_span_min_tokens: int = 5
-    causal_credit_span_max_tokens: int = 50
-    causal_credit_cf_batch_size: int = 8
-    causal_credit_mean_normalize: bool = False
-    causal_credit_skip_zero_advantage: bool = True
     semifactual_enabled: bool = False
     semifactual_lambda: float = 0.01
     semifactual_n_steps: int = 60
     semifactual_norm_eps: float = 1e-6
 
     def post_init(self):
-        if self.causal_credit_weighting_mode not in {"counterfactual", "inverted", "random", "uniform"}:
-            raise ValueError("Unknown algorithm.causal_credit_weighting_mode.")
-        for name in ("min_weight", "max_weight", "answer_weight"):
-            value = getattr(self, f"causal_credit_{name}")
-            if not math.isfinite(value) or value <= 0:
-                raise ValueError(f"algorithm.causal_credit_{name} must be finite and positive.")
-        if self.causal_credit_max_weight < self.causal_credit_min_weight:
-            raise ValueError("causal_credit_max_weight must be >= causal_credit_min_weight.")
-        if self.causal_credit_max_spans < 0 or self.causal_credit_cf_batch_size <= 0:
-            raise ValueError("causal_credit_max_spans must be non-negative and cf_batch_size positive.")
-        if not 0 < self.causal_credit_span_min_tokens <= self.causal_credit_span_max_tokens:
-            raise ValueError("Causal-credit span lengths must satisfy 0 < min_tokens <= max_tokens.")
-        if self.causal_credit_enabled and self.semifactual_enabled:
-            raise ValueError("CF-GRPO and SCAPO must be enabled separately.")
-        if self.causal_credit_enabled and self.adv_estimator != "grpo":
-            raise ValueError("CF-GRPO requires algorithm.adv_estimator='grpo'.")
         if not math.isfinite(self.semifactual_lambda) or self.semifactual_lambda < 0:
             raise ValueError("algorithm.semifactual_lambda must be finite and non-negative.")
         if self.semifactual_n_steps < 0:
@@ -174,22 +147,11 @@ class PPOConfig:
         self.worker.actor.use_kl_loss = self.algorithm.use_kl_loss
         self.worker.actor.kl_penalty = self.algorithm.kl_penalty
         self.worker.actor.kl_coef = self.algorithm.kl_coef
-        self.worker.actor.causal_credit_enabled = self.algorithm.causal_credit_enabled
-        self.worker.actor.causal_credit_weighting_mode = self.algorithm.causal_credit_weighting_mode
-        self.worker.actor.causal_credit_min_weight = self.algorithm.causal_credit_min_weight
-        self.worker.actor.causal_credit_max_weight = self.algorithm.causal_credit_max_weight
-        self.worker.actor.causal_credit_answer_weight = self.algorithm.causal_credit_answer_weight
-        self.worker.actor.causal_credit_max_spans = self.algorithm.causal_credit_max_spans
-        self.worker.actor.causal_credit_span_min_tokens = self.algorithm.causal_credit_span_min_tokens
-        self.worker.actor.causal_credit_span_max_tokens = self.algorithm.causal_credit_span_max_tokens
-        self.worker.actor.causal_credit_cf_batch_size = self.algorithm.causal_credit_cf_batch_size
-        self.worker.actor.causal_credit_mean_normalize = self.algorithm.causal_credit_mean_normalize
-        self.worker.actor.causal_credit_skip_zero_advantage = self.algorithm.causal_credit_skip_zero_advantage
-        if self.algorithm.causal_credit_enabled:
-            if self.worker.actor.loss_type != "default":
-                raise ValueError("CF-GRPO requires worker.actor.loss_type='default'.")
-            if self.worker.actor.ulysses_size != 1:
-                raise ValueError("CF-GRPO currently requires worker.actor.ulysses_size=1.")
+        if self.worker.actor.loss_type == "cf_grpo":
+            if self.algorithm.semifactual_enabled:
+                raise ValueError("CF-GRPO and SCAPO must be enabled separately.")
+            if self.algorithm.adv_estimator != "grpo":
+                raise ValueError("CF-GRPO requires algorithm.adv_estimator='grpo'.")
 
     def deep_post_init(self):
         recursive_post_init(self)

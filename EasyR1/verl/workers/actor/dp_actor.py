@@ -186,73 +186,61 @@ class DataParallelPPOActor(BasePPOActor):
         temperature = data.meta_info["temperature"]
         select_keys = ["input_ids", "attention_mask", "position_ids", "responses", "response_mask"]
         select_keys.extend(["old_log_probs", "ref_log_probs", "advantages"])
-        if "causal_credit_weights" in data.batch:
-            select_keys.append("causal_credit_weights")
+        if "cf_grpo_weights" in data.batch:
+            select_keys.append("cf_grpo_weights")
         non_tensor_select_keys = ["multi_modal_inputs"]
 
         mini_batches = data.select(select_keys, non_tensor_select_keys).split(self.config.global_batch_size_per_device)
 
         metrics = defaultdict(list)
-        if "causal_credit_weights" in data.batch:
+        if "cf_grpo_weights" in data.batch:
             valid_weight_mask = data.batch["response_mask"].bool()
-            valid_weights = data.batch["causal_credit_weights"][valid_weight_mask]
+            valid_weights = data.batch["cf_grpo_weights"][valid_weight_mask]
             if valid_weights.numel() > 0:
                 append_to_dict(
                     metrics,
                     {
-                        "actor/causal_credit_weight_mean": valid_weights.mean().detach().item(),
-                        "actor/causal_credit_weight_std": valid_weights.std(unbiased=False).detach().item(),
-                        "actor/causal_credit_weight_min": valid_weights.min().detach().item(),
-                        "actor/causal_credit_weight_max": valid_weights.max().detach().item(),
+                        "actor/cf_grpo_weight_mean": valid_weights.mean().detach().item(),
+                        "actor/cf_grpo_weight_std": valid_weights.std(unbiased=False).detach().item(),
                     },
                 )
-            if "causal_credit_skipped_zero_advantage" in data.batch:
+            if "cf_grpo_skipped_zero_advantage" in data.batch:
                 append_to_dict(
                     metrics,
                     {
-                        "actor/causal_credit_skipped_zero_advantage": data.batch[
-                            "causal_credit_skipped_zero_advantage"
+                        "actor/cf_grpo_skipped_zero_advantage": data.batch[
+                            "cf_grpo_skipped_zero_advantage"
                         ]
                         .sum()
                         .detach()
                         .item()
                     },
                 )
-            if "causal_credit_skipped_no_answer" in data.batch:
+            if "cf_grpo_skipped_no_answer" in data.batch:
                 append_to_dict(
                     metrics,
                     {
-                        "actor/causal_credit_skipped_no_answer": data.batch["causal_credit_skipped_no_answer"]
+                        "actor/cf_grpo_skipped_no_answer": data.batch["cf_grpo_skipped_no_answer"]
                         .sum()
                         .detach()
                         .item()
                     },
                 )
-            if "causal_credit_skipped_no_spans" in data.batch:
+            if "cf_grpo_skipped_no_spans" in data.batch:
                 append_to_dict(
                     metrics,
                     {
-                        "actor/causal_credit_skipped_no_spans": data.batch["causal_credit_skipped_no_spans"]
+                        "actor/cf_grpo_skipped_no_spans": data.batch["cf_grpo_skipped_no_spans"]
                         .sum()
                         .detach()
                         .item()
                     },
                 )
-            if "causal_credit_skipped_multimodal" in data.batch:
+            if "cf_grpo_span_count" in data.batch:
                 append_to_dict(
                     metrics,
                     {
-                        "actor/causal_credit_skipped_multimodal": data.batch["causal_credit_skipped_multimodal"]
-                        .sum()
-                        .detach()
-                        .item()
-                    },
-                )
-            if "causal_credit_span_count" in data.batch:
-                append_to_dict(
-                    metrics,
-                    {
-                        "actor/causal_credit_span_count_mean": data.batch["causal_credit_span_count"]
+                        "actor/cf_grpo_span_count_mean": data.batch["cf_grpo_span_count"]
                         .mean()
                         .detach()
                         .item()
@@ -302,7 +290,7 @@ class DataParallelPPOActor(BasePPOActor):
                         fipo_influence_clip_high=self.config.fipo_influence_clip_high,
                         fipo_safety_threshold=self.config.fipo_safety_threshold,
                         fipo_chunk_size=self.config.fipo_chunk_size,
-                        loss_weights=model_inputs.get("causal_credit_weights"),
+                        loss_weights=model_inputs.get("cf_grpo_weights"),
                     )
                     if self.config.use_kl_loss and "ref_log_probs" in model_inputs:
                         ref_log_probs = model_inputs["ref_log_probs"]

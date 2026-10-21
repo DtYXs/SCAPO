@@ -18,14 +18,14 @@ HERE = Path(__file__).resolve().parent
 MATH = json.loads((HERE / "benchmarks.json").read_text())
 GROUPS = {
     "AIME 24-26": ["aime2024", "aime2025", "aime2026"],
-    "AMC 23-25": ["amc23", "amc2024", "amc2025"],
-    "HMMT 25-26": ["hmmt_feb_2025", "hmmt_feb_2026"],
+    "AMC 23-25": ["amc2023", "amc2024", "amc2025"],
+    "HMMT 25-26": ["hmmt2025", "hmmt2026"],
     "BRUMO 25": ["brumo_2025"],
     "SMT 25": ["smt_2025"],
     "Omni-Math": ["omni_math_rule"],
     "Minerva": ["minerva"],
     "Olympiad": ["olympiadbench"],
-    "NoOp-AIME 24-26": ["noop_aime24", "noop_aime25", "noop_aime26"],
+    "NoOp-AIME 24-26": ["noop_aime2024", "noop_aime2025", "noop_aime2026"],
     "ThinkBench-AIME 24-26": ["thinkbench_aime2024", "thinkbench_aime2025", "thinkbench_aime2026"],
 }
 
@@ -78,11 +78,11 @@ def write_json(path, value):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Evaluate all paper benchmarks, or a single benchmark.')
+    parser = argparse.ArgumentParser(description='Evaluate available paper benchmarks, or a single benchmark.')
     parser.add_argument("--model", required=True, help="HF model ID, merged model, or training checkpoint directory")
     selection = parser.add_mutually_exclusive_group()
     selection.add_argument("--benchmark", choices=(*MATH, "gpqa"),
-                           help="Evaluate one benchmark (default: all paper benchmarks)")
+                           help="Evaluate one benchmark (default: all available paper benchmarks)")
     selection.add_argument("--suite", choices=("all", "math", "gpqa"), default="all", help=argparse.SUPPRESS)
     parser.add_argument("--gpus", default=os.environ.get("GPU_IDS", "0,1,2,3,4,5,6,7"))
     parser.add_argument("--tensor-parallel-size", type=int, default=1)
@@ -101,10 +101,14 @@ def main():
     if args.benchmark in MATH:
         math_benchmarks = {args.benchmark: MATH[args.benchmark]}
     include_gpqa = suite in {"all", "gpqa"}
-    benchmarks = list(math_benchmarks) + (["gpqa"] if include_gpqa else [])
     gpqa_file = args.gpqa_file.expanduser().resolve()
+    if include_gpqa and suite == "all" and not gpqa_file.exists():
+        print(f"Skipping GPQA-Diamond: {gpqa_file} not found.", flush=True)
+        include_gpqa = False
+        suite = "math"
     if include_gpqa:
         load_samples(gpqa_file)
+    benchmarks = list(math_benchmarks) + (["gpqa"] if include_gpqa else [])
     timestamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
     model_name = re.sub(r"[^A-Za-z0-9._-]+", "_", args.model).strip("._") or "model"
     output = (args.output_dir or ROOT / "outputs/eval" / f"{model_name}_{timestamp}").expanduser().resolve()

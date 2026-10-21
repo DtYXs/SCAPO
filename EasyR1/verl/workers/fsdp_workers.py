@@ -40,7 +40,7 @@ from ..models.monkey_patch import apply_ulysses_patch
 from ..protocol import DataProto
 from ..single_controller.base import Worker
 from ..single_controller.base.decorator import Dispatch, register
-from ..utils.causal_credit import compute_causal_credit_weights
+from ..utils.cf_grpo import compute_cf_grpo_weights
 from ..utils.checkpoint.fsdp_checkpoint_manager import FSDPCheckpointManager
 from ..utils.dataset import process_image, process_video
 from ..utils.flops_counter import FlopsCounter
@@ -591,7 +591,7 @@ class FSDPWorker(Worker):
         return output
 
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
-    def compute_causal_credit_weights(self, data: DataProto):
+    def compute_cf_grpo_weights(self, data: DataProto):
         assert self._has_actor
 
         self._process_multi_modal_inputs(data)
@@ -601,12 +601,12 @@ class FSDPWorker(Worker):
 
         def uniform_output(skipped_multimodal: bool = False):
             tensors = {
-                "causal_credit_weights": torch.ones_like(response_mask, dtype=torch.float32),
-                "causal_credit_skipped_zero_advantage": torch.zeros(batch_size, device=response_mask.device),
-                "causal_credit_skipped_no_answer": torch.zeros(batch_size, device=response_mask.device),
-                "causal_credit_skipped_no_spans": torch.zeros(batch_size, device=response_mask.device),
-                "causal_credit_span_count": torch.zeros(batch_size, device=response_mask.device),
-                "causal_credit_skipped_multimodal": torch.full(
+                "cf_grpo_weights": torch.ones_like(response_mask, dtype=torch.float32),
+                "cf_grpo_skipped_zero_advantage": torch.zeros(batch_size, device=response_mask.device),
+                "cf_grpo_skipped_no_answer": torch.zeros(batch_size, device=response_mask.device),
+                "cf_grpo_skipped_no_spans": torch.zeros(batch_size, device=response_mask.device),
+                "cf_grpo_span_count": torch.zeros(batch_size, device=response_mask.device),
+                "cf_grpo_skipped_multimodal": torch.full(
                     (batch_size,), float(skipped_multimodal), dtype=torch.float32, device=response_mask.device
                 ),
             }
@@ -622,7 +622,7 @@ class FSDPWorker(Worker):
         self.fsdp_module.eval()
         with self.ulysses_sharding_manager:
             data = self.ulysses_sharding_manager.preprocess_data(data=data)
-            result = compute_causal_credit_weights(
+            result = compute_cf_grpo_weights(
                 model=self.fsdp_module,
                 tokenizer=self.tokenizer,
                 input_ids=data.batch["input_ids"],
@@ -630,27 +630,24 @@ class FSDPWorker(Worker):
                 position_ids=data.batch["position_ids"],
                 response_mask=data.batch["response_mask"],
                 advantages=data.batch["advantages"] if "advantages" in data.batch else None,
-                weighting_mode=self.config.actor.causal_credit_weighting_mode,
-                min_weight=self.config.actor.causal_credit_min_weight,
-                max_weight=self.config.actor.causal_credit_max_weight,
-                answer_weight=self.config.actor.causal_credit_answer_weight,
-                max_spans=self.config.actor.causal_credit_max_spans,
-                span_min_tokens=self.config.actor.causal_credit_span_min_tokens,
-                span_max_tokens=self.config.actor.causal_credit_span_max_tokens,
-                cf_batch_size=self.config.actor.causal_credit_cf_batch_size,
-                mean_normalize=self.config.actor.causal_credit_mean_normalize,
-                skip_zero_advantage=self.config.actor.causal_credit_skip_zero_advantage,
+                min_weight=self.config.actor.cf_grpo_min_weight,
+                max_weight=self.config.actor.cf_grpo_max_weight,
+                answer_weight=self.config.actor.cf_grpo_answer_weight,
+                max_spans=self.config.actor.cf_grpo_max_spans,
+                span_min_tokens=self.config.actor.cf_grpo_span_min_tokens,
+                span_max_tokens=self.config.actor.cf_grpo_span_max_tokens,
+                cf_grpo_batch_size=self.config.actor.cf_grpo_batch_size,
             )
             output = DataProto.from_dict(
                 tensors={
-                    "causal_credit_weights": result.weights,
-                    "causal_credit_skipped_zero_advantage": result.skipped_zero_advantage,
-                    "causal_credit_skipped_no_answer": result.skipped_no_answer,
-                    "causal_credit_skipped_no_spans": result.skipped_no_spans,
-                    "causal_credit_span_count": result.span_counts,
-                    "causal_credit_skipped_multimodal": torch.zeros_like(result.span_counts),
+                    "cf_grpo_weights": result.weights,
+                    "cf_grpo_skipped_zero_advantage": result.skipped_zero_advantage,
+                    "cf_grpo_skipped_no_answer": result.skipped_no_answer,
+                    "cf_grpo_skipped_no_spans": result.skipped_no_spans,
+                    "cf_grpo_span_count": result.span_counts,
+                    "cf_grpo_skipped_multimodal": torch.zeros_like(result.span_counts),
                 },
-                meta_info={"causal_credit_cf_forward_count": result.cf_forward_count},
+                meta_info={"cf_grpo_forward_count": result.cf_grpo_forward_count},
             )
             output = self.ulysses_sharding_manager.postprocess_data(output)
 

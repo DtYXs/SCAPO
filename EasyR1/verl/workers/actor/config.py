@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import math
 import os
 from dataclasses import dataclass, field
 from typing import Any, Optional
@@ -110,6 +111,13 @@ class ActorConfig:
     clip_ratio_dual: float = 3.0
     loss_avg_mode: str = "token"
     loss_type: str = "default"
+    cf_grpo_min_weight: float = 0.5
+    cf_grpo_max_weight: float = 4.0
+    cf_grpo_answer_weight: float = 1.5
+    cf_grpo_max_spans: int = 10
+    cf_grpo_span_min_tokens: int = 5
+    cf_grpo_span_max_tokens: int = 50
+    cf_grpo_batch_size: int = 8
     fipo_decay_rate: float = 32.0
     fipo_influence_clip_low: float = 0.0
     fipo_influence_clip_high: float = 0.2
@@ -132,19 +140,21 @@ class ActorConfig:
     kl_penalty: str = field(default="kl", init=False)
     kl_coef: float = field(default=0.0, init=False)
 
-    causal_credit_enabled: bool = field(default=False, init=False)
-    causal_credit_weighting_mode: str = field(default="counterfactual", init=False)
-    causal_credit_min_weight: float = field(default=0.5, init=False)
-    causal_credit_max_weight: float = field(default=4.0, init=False)
-    causal_credit_answer_weight: float = field(default=1.5, init=False)
-    causal_credit_max_spans: int = field(default=10, init=False)
-    causal_credit_span_min_tokens: int = field(default=5, init=False)
-    causal_credit_span_max_tokens: int = field(default=50, init=False)
-    causal_credit_cf_batch_size: int = field(default=8, init=False)
-    causal_credit_mean_normalize: bool = field(default=False, init=False)
-    causal_credit_skip_zero_advantage: bool = field(default=True, init=False)
-
     def post_init(self):
+        if self.loss_type == "cf_grpo":
+            for name in ("min_weight", "max_weight", "answer_weight"):
+                value = getattr(self, f"cf_grpo_{name}")
+                if not math.isfinite(value) or value <= 0:
+                    raise ValueError(f"worker.actor.cf_grpo_{name} must be finite and positive.")
+            if self.cf_grpo_max_weight < self.cf_grpo_min_weight:
+                raise ValueError("cf_grpo_max_weight must be >= cf_grpo_min_weight.")
+            if self.cf_grpo_max_spans < 0 or self.cf_grpo_batch_size <= 0:
+                raise ValueError("cf_grpo_max_spans must be non-negative and cf_grpo_batch_size positive.")
+            if not 0 < self.cf_grpo_span_min_tokens <= self.cf_grpo_span_max_tokens:
+                raise ValueError("CF-GRPO span lengths must satisfy 0 < min_tokens <= max_tokens.")
+            if self.ulysses_size != 1:
+                raise ValueError("CF-GRPO currently requires worker.actor.ulysses_size=1.")
+            return
         if self.loss_type == "sapo":
             if self.tau_positive <= 0:
                 raise ValueError(f"tau_positive must be positive for SAPO, got {self.tau_positive}.")

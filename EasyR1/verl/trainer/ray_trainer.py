@@ -63,12 +63,6 @@ from .metrics import (
 )
 
 
-def _resolve_aime_overall_metric_name(dataset_name):
-    if dataset_name in {"aime2024", "aime2025", "aime2026"}:
-        return "val/aime_overall_reward"
-    return None
-
-
 class Role(IntEnum):
     Actor = auto()
     Rollout = auto()
@@ -315,7 +309,7 @@ class RayPPOTrainer:
     def _apply_semifactual_update(self, batch: DataProto, effective_lambda: float) -> dict[str, float]:
         response_mask = batch.batch["response_mask"]
         perturbed_log_probs = self._compute_semifactual_log_probs(batch)
-        raw_score, normalized_score, diagnostics = compute_semifactual_importance(
+        _, normalized_score, diagnostics = compute_semifactual_importance(
             base_log_probs=batch.batch["old_log_probs"],
             perturbed_log_probs_by_type=perturbed_log_probs,
             response_mask=response_mask,
@@ -331,8 +325,6 @@ class RayPPOTrainer:
         valid_correction = correction[response_mask.bool()]
         metrics = {
             "semifactual/effective_lambda": float(effective_lambda),
-            "semifactual/num_types": float(len(PERTURBATION_TYPES)),
-            "semifactual/raw_abs_mean": VF.masked_mean(raw_score.abs(), response_mask).detach().item(),
             "semifactual/correction_abs_mean": VF.masked_mean(correction.abs(), response_mask).detach().item(),
             "semifactual/correction_nonzero_frac": (
                 (valid_correction != 0).float().mean().detach().item() if valid_correction.numel() else 0.0
@@ -472,7 +464,6 @@ class RayPPOTrainer:
     def _validate(self) -> dict[str, Any]:
         all_metrics = {}
         all_reward_scores = []
-        aime_group_reward_scores = defaultdict(list)
 
         print("Start validation...")
         self.actor_rollout_ref_wg.prepare_rollout_engine()
@@ -487,18 +478,11 @@ class RayPPOTrainer:
                 reward_score = float(dataset_metrics[score_key])
                 all_reward_scores.append(reward_score)
 
-                aime_metric_name = _resolve_aime_overall_metric_name(dataset_name)
-                if aime_metric_name is not None:
-                    aime_group_reward_scores[aime_metric_name].append(reward_score)
-
         self.actor_rollout_ref_wg.release_rollout_engine()
 
         if all_reward_scores:
             self.val_reward_score = sum(all_reward_scores) / len(all_reward_scores)
             all_metrics["val/overall_reward"] = self.val_reward_score
-
-        for metric_name, reward_scores in aime_group_reward_scores.items():
-            all_metrics[metric_name] = sum(reward_scores) / len(reward_scores)
 
         print("Finish validation.")
         return all_metrics
@@ -759,10 +743,10 @@ class RayPPOTrainer:
                         lam=self.config.algorithm.lam,
                     )
 
-                if self.config.algorithm.causal_credit_enabled:
-                    with timer("causal_credit", timing_raw):
-                        causal_credit_output = self.actor_rollout_ref_wg.compute_causal_credit_weights(batch)
-                        batch = batch.union(causal_credit_output)
+                if self.config.worker.actor.loss_type == "cf_grpo":
+                    with timer("cf_grpo", timing_raw):
+                        cf_grpo_output = self.actor_rollout_ref_wg.compute_cf_grpo_weights(batch)
+                        batch = batch.union(cf_grpo_output)
 
                 if self.config.algorithm.semifactual_enabled:
                     effective_lambda, semifactual_active = resolve_semifactual_lambda(
@@ -772,9 +756,7 @@ class RayPPOTrainer:
                     )
                     metrics.update(
                         {
-                            "semifactual/enabled": 1.0,
                             "semifactual/active": float(semifactual_active),
-                            "semifactual/base_lambda": float(self.config.algorithm.semifactual_lambda),
                             "semifactual/effective_lambda": float(effective_lambda),
                         }
                     )

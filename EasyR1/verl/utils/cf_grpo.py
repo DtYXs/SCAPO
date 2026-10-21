@@ -12,11 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Online causal-credit weights for CounterfactualGRPO-style policy optimization.
+Token-level policy-loss weights for Counterfactual GRPO (CF-GRPO).
 
-Ported from the reproduce_cf branch: detect reasoning spans, replace each span
-with an equal-length placeholder, measure the answer log-probability drop under
-teacher forcing, and weight the token-level policy-gradient loss.
+Detect reasoning spans, replace each span with an equal-length placeholder,
+measure the answer log-probability drop under teacher forcing, and weight the
+token-level policy-gradient loss.
 """
 
 from __future__ import annotations
@@ -52,13 +52,13 @@ class AnswerRegion:
 
 
 @dataclass
-class CausalCreditResult:
+class CFGRPOResult:
     weights: torch.Tensor
     skipped_zero_advantage: torch.Tensor
     skipped_no_answer: torch.Tensor
     skipped_no_spans: torch.Tensor
     span_counts: torch.Tensor
-    cf_forward_count: int
+    cf_grpo_forward_count: int
 
 
 def _decode_ids(tokenizer: Any, token_ids: list[int]) -> str:
@@ -118,7 +118,7 @@ def find_answer_region(
     """Locate the final-answer region inside a generated response.
 
     Returns None if no explicit answer marker is present. This avoids assigning
-    causal-credit weights to arbitrary response tails when the model did not
+    CF-GRPO weights to arbitrary response tails when the model did not
     follow the answer format.
     """
     token_ids = _to_int_list(input_ids)
@@ -288,65 +288,49 @@ def build_weights_from_span_scores(
     min_weight: float = 0.5,
     max_weight: float = 4.0,
     answer_weight: float = 1.5,
-    weighting_mode: str = "counterfactual",
-    mean_normalize: bool = False,
     eps: float = 1e-6,
     device: Optional[torch.device] = None,
 ) -> torch.Tensor:
-    """Map span-level causal scores to response-token weights.
+    """Map span-level answer log-probability drops to CF-GRPO token weights.
 
     This mirrors the official CounterfactualGRPO weighting shape: every
     reasoning token starts with a small baseline importance, each span's answer
     log-probability drop is divided over its tokens, and the reasoning region is
     normalized before being mapped to soft weights.
     """
-    if weighting_mode not in {"counterfactual", "inverted", "random", "uniform"}:
-        raise ValueError(f"Unknown causal-credit weighting mode: {weighting_mode}.")
     if min_weight <= 0:
-        raise ValueError("causal_credit_min_weight must be positive.")
+        raise ValueError("cf_grpo_min_weight must be positive.")
     if max_weight < min_weight:
-        raise ValueError("causal_credit_max_weight must be >= causal_credit_min_weight.")
+        raise ValueError("cf_grpo_max_weight must be >= cf_grpo_min_weight.")
 
     weights = torch.ones(response_length, dtype=torch.float32, device=device)
-    if response_length <= 0 or weighting_mode == "uniform":
+    if response_length <= 0:
         return weights
 
     reasoning_rel_end = max(0, min(response_length, answer_start - prompt_length))
     if reasoning_rel_end > 0:
-        if weighting_mode == "random":
-            weights[:reasoning_rel_end] = min_weight + torch.rand(
-                reasoning_rel_end, dtype=torch.float32, device=device
-            ) * (max_weight - min_weight)
-        else:
-            importance = torch.full((reasoning_rel_end,), 0.2, dtype=torch.float32, device=device)
-            for (span_start, span_end), span_score in zip(spans, span_scores):
-                rel_start = max(0, span_start - prompt_length)
-                rel_end = min(reasoning_rel_end, span_end - prompt_length)
-                if rel_start >= rel_end:
-                    continue
-                span_len = max(1, span_end - span_start)
-                importance[rel_start:rel_end] += float(span_score) / span_len
+        importance = torch.full((reasoning_rel_end,), 0.2, dtype=torch.float32, device=device)
+        for (span_start, span_end), span_score in zip(spans, span_scores):
+            rel_start = max(0, span_start - prompt_length)
+            rel_end = min(reasoning_rel_end, span_end - prompt_length)
+            if rel_start >= rel_end:
+                continue
+            span_len = max(1, span_end - span_start)
+            importance[rel_start:rel_end] += float(span_score) / span_len
 
-            importance_min = torch.min(importance)
-            importance_max = torch.max(importance)
-            if torch.abs(importance_max - importance_min) > eps:
-                normalized = (importance - importance_min) / (importance_max - importance_min + eps)
-                if weighting_mode == "inverted":
-                    normalized = 1.0 - normalized
-                normalized = 0.5 + 0.5 * normalized
-            else:
-                normalized = torch.full_like(importance, 0.5)
-            weights[:reasoning_rel_end] = min_weight + normalized * (max_weight - min_weight)
+        importance_min = torch.min(importance)
+        importance_max = torch.max(importance)
+        if torch.abs(importance_max - importance_min) > eps:
+            normalized = (importance - importance_min) / (importance_max - importance_min + eps)
+            normalized = 0.5 + 0.5 * normalized
+        else:
+            normalized = torch.full_like(importance, 0.5)
+        weights[:reasoning_rel_end] = min_weight + normalized * (max_weight - min_weight)
 
     answer_rel_start = max(0, answer_start - prompt_length)
     answer_rel_end = min(response_length, answer_end - prompt_length)
     if answer_rel_start < answer_rel_end:
         weights[answer_rel_start:answer_rel_end] = answer_weight
-
-    if mean_normalize and response_length > 0:
-        mean = torch.mean(weights)
-        if torch.isfinite(mean) and mean.abs() > eps:
-            weights = weights / mean
 
     return weights
 
@@ -380,7 +364,7 @@ def _distributed_max(value: int, device: torch.device) -> int:
 
 
 @torch.no_grad()
-def compute_causal_credit_weights(
+def compute_cf_grpo_weights(
     model: torch.nn.Module,
     tokenizer: Any,
     input_ids: torch.Tensor,
@@ -388,22 +372,16 @@ def compute_causal_credit_weights(
     position_ids: torch.Tensor,
     response_mask: torch.Tensor,
     advantages: Optional[torch.Tensor] = None,
-    weighting_mode: str = "counterfactual",
     min_weight: float = 0.5,
     max_weight: float = 4.0,
     answer_weight: float = 1.5,
     max_spans: int = 10,
     span_min_tokens: int = 5,
     span_max_tokens: int = 50,
-    cf_batch_size: int = 8,
-    mean_normalize: bool = False,
-    skip_zero_advantage: bool = True,
+    cf_grpo_batch_size: int = 8,
     eps: float = 1e-6,
-) -> CausalCreditResult:
-    """Compute response-token causal-credit weights for a local actor batch."""
-    if weighting_mode not in {"counterfactual", "inverted", "random", "uniform"}:
-        raise ValueError(f"Unknown causal-credit weighting mode: {weighting_mode}.")
-
+) -> CFGRPOResult:
+    """Compute CF-GRPO response weights, skipping probes for zero-advantage samples."""
     device = input_ids.device
     batch_size, seq_len = input_ids.shape
     response_length = response_mask.shape[-1]
@@ -414,23 +392,13 @@ def compute_causal_credit_weights(
     skipped_no_spans = torch.zeros(batch_size, dtype=torch.float32, device=device)
     span_counts = torch.zeros(batch_size, dtype=torch.float32, device=device)
 
-    if weighting_mode == "uniform":
-        return CausalCreditResult(
-            weights=weights,
-            skipped_zero_advantage=skipped_zero_advantage,
-            skipped_no_answer=skipped_no_answer,
-            skipped_no_spans=skipped_no_spans,
-            span_counts=span_counts,
-            cf_forward_count=0,
-        )
-
     sample_infos: dict[int, dict[str, Any]] = {}
     all_sequences = []
     all_attention_masks = []
     all_position_ids = []
     sequence_records = []
-    cf_forward_count = 0
-    cf_batch_size = max(1, int(cf_batch_size))
+    cf_grpo_forward_count = 0
+    cf_grpo_batch_size = max(1, int(cf_grpo_batch_size))
     pad_token_id = getattr(tokenizer, "pad_token_id", None)
     eos_token_id = getattr(tokenizer, "eos_token_id", None)
     mask_token_id = pad_token_id if pad_token_id is not None else eos_token_id
@@ -443,7 +411,7 @@ def compute_causal_credit_weights(
             skipped_no_answer[batch_idx] = 1.0
             continue
 
-        if skip_zero_advantage and advantages is not None:
+        if advantages is not None:
             valid_advantages = advantages[batch_idx, :valid_response_length]
             if valid_advantages.numel() == 0 or torch.max(torch.abs(valid_advantages)).item() <= eps:
                 skipped_zero_advantage[batch_idx] = 1.0
@@ -483,26 +451,6 @@ def compute_causal_credit_weights(
                 min_weight=min_weight,
                 max_weight=max_weight,
                 answer_weight=answer_weight,
-                weighting_mode=weighting_mode,
-                mean_normalize=mean_normalize,
-                eps=eps,
-                device=device,
-            )
-            continue
-
-        if weighting_mode == "random":
-            weights[batch_idx, :valid_response_length] = build_weights_from_span_scores(
-                response_length=valid_response_length,
-                prompt_length=prompt_length,
-                answer_start=region.answer_start,
-                answer_end=region.answer_end,
-                spans=spans,
-                span_scores=[0.0] * len(spans),
-                min_weight=min_weight,
-                max_weight=max_weight,
-                answer_weight=answer_weight,
-                weighting_mode=weighting_mode,
-                mean_normalize=mean_normalize,
                 eps=eps,
                 device=device,
             )
@@ -534,8 +482,8 @@ def compute_causal_credit_weights(
             dummy_attention_mask = attention_mask[0].clone()
             dummy_position_ids = position_ids[0].clone()
 
-        for chunk_start in range(0, global_sequence_count, cf_batch_size):
-            chunk_end = min(global_sequence_count, chunk_start + cf_batch_size)
+        for chunk_start in range(0, global_sequence_count, cf_grpo_batch_size):
+            chunk_end = min(global_sequence_count, chunk_start + cf_grpo_batch_size)
             local_end = min(len(all_sequences), chunk_end)
             local_sequences = all_sequences[chunk_start:local_end]
             local_attention_masks = all_attention_masks[chunk_start:local_end]
@@ -559,7 +507,7 @@ def compute_causal_credit_weights(
                 position_ids=chunk_position_ids,
                 use_cache=False,
             )
-            cf_forward_count += 1
+            cf_grpo_forward_count += 1
 
             for local_idx, (batch_idx, span_idx) in enumerate(chunk_records):
                 if batch_idx is None or span_idx is None:
@@ -601,17 +549,15 @@ def compute_causal_credit_weights(
                 min_weight=min_weight,
                 max_weight=max_weight,
                 answer_weight=answer_weight,
-                weighting_mode=weighting_mode,
-                mean_normalize=mean_normalize,
                 eps=eps,
                 device=device,
             )
 
-    return CausalCreditResult(
+    return CFGRPOResult(
         weights=weights,
         skipped_zero_advantage=skipped_zero_advantage,
         skipped_no_answer=skipped_no_answer,
         skipped_no_spans=skipped_no_spans,
         span_counts=span_counts,
-        cf_forward_count=cf_forward_count,
+        cf_grpo_forward_count=cf_grpo_forward_count,
     )

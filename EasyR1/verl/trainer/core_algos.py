@@ -147,7 +147,6 @@ def compute_semifactual_importance(
     if not perturbed_log_probs_by_type:
         raise ValueError("At least one semifactual log-prob tensor is required.")
 
-    metrics: dict[str, float] = {}
     type_scores = []
     type_distances = []
     for perturb_type, perturbed_log_probs in perturbed_log_probs_by_type.items():
@@ -160,17 +159,12 @@ def compute_semifactual_importance(
         score = masked_group_zscore(-distance, response_mask, index, eps=eps)
         type_distances.append(distance)
         type_scores.append(score)
-        metrics[f"distance/{perturb_type}"] = VF.masked_mean(distance, response_mask).detach().item()
 
     aggregate_distance = torch.stack(type_distances, dim=0).mean(dim=0) * response_mask
     aggregate_score = torch.stack(type_scores, dim=0).mean(dim=0) * response_mask
     normalized_score = masked_group_zscore(aggregate_score, response_mask, index, eps=eps)
 
-    valid = normalized_score[response_mask.bool()]
-    metrics["distance/mean"] = VF.masked_mean(aggregate_distance, response_mask).detach().item()
-    metrics["u/mean"] = VF.masked_mean(normalized_score, response_mask).detach().item()
-    metrics["u/std"] = valid.std(unbiased=False).detach().item() if valid.numel() else 0.0
-    metrics["u/negative_frac"] = (valid < 0).float().mean().detach().item() if valid.numel() else 0.0
+    metrics = {"distance/mean": VF.masked_mean(aggregate_distance, response_mask).detach().item()}
     return aggregate_score, normalized_score, metrics
 
 
@@ -453,11 +447,7 @@ def compute_fipo_influence_weights(
     diagnostics = {
         "fipo_diag_valid_count": valid_count,
         "fipo_diag_future_kl_sum": valid_future_kl.sum() if valid_future_kl.numel() else zero,
-        "fipo_diag_future_kl_min": valid_future_kl.min() if valid_future_kl.numel() else zero,
-        "fipo_diag_future_kl_max": valid_future_kl.max() if valid_future_kl.numel() else zero,
         "fipo_diag_influence_weight_sum": valid_weights.sum() if valid_weights.numel() else zero,
-        "fipo_diag_influence_weight_min": valid_weights.min() if valid_weights.numel() else zero,
-        "fipo_diag_influence_weight_max": valid_weights.max() if valid_weights.numel() else zero,
         "fipo_diag_upper_clip_count": upper_clip_mask.sum(),
         "fipo_diag_lower_clip_count": lower_clip_mask.sum(),
         "fipo_diag_extreme_filter_count": extreme_filter_mask.sum(),
@@ -476,7 +466,7 @@ def compute_policy_loss(
     clip_ratio_dual: float,
     tau_positive: float,
     tau_negative: float,
-    loss_type: Literal["default", "gspo", "gspo_token", "sapo", "fipo"],
+    loss_type: Literal["default", "gspo", "gspo_token", "sapo", "cf_grpo", "fipo"],
     loss_avg_mode: Literal["token", "seq"],
     fipo_decay_rate: float = 32.0,
     fipo_influence_clip_low: float = 0.0,
@@ -486,6 +476,8 @@ def compute_policy_loss(
     loss_weights: Optional[torch.Tensor] = None,
     **kwargs,
 ) -> tuple[torch.Tensor, dict[str, float]]:
+    if loss_type == "cf_grpo" and loss_weights is None:
+        raise ValueError("CF-GRPO requires response-token weights before the actor update.")
     negative_approx_kl = log_probs - old_log_probs
     if loss_type in ["gspo", "gspo_token"]:
         negative_approx_kl_in_seq = VF.masked_mean(negative_approx_kl, response_mask, dim=-1)
@@ -540,7 +532,6 @@ def compute_policy_loss(
         valid_response_mask = response_mask.bool()
         positive_adv_mask = (advantages > 0) & valid_response_mask
         negative_adv_mask = (advantages < 0) & valid_response_mask
-        zero_adv_mask = (advantages == 0) & valid_response_mask
         high_clip_mask = primary_clip_mask & positive_adv_mask
         low_clip_mask = primary_clip_mask & negative_adv_mask
 
@@ -549,9 +540,6 @@ def compute_policy_loss(
         clip_count_metrics = {
             "pg_clip_high_count": high_clip_mask.sum(),
             "pg_clip_low_count": low_clip_mask.sum(),
-            "adv_positive_count": positive_adv_mask.sum(),
-            "adv_negative_count": negative_adv_mask.sum(),
-            "adv_zero_count": zero_adv_mask.sum(),
             "pg_valid_token_count": valid_response_mask.sum(),
         }
 

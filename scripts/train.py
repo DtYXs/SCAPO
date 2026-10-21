@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "EasyR1"))
@@ -45,7 +46,6 @@ def build_config(method, size, *, model_path=None, output_dir=None, gpus=8, max_
             "disable_kl": True,
             "use_kl_loss": False,
             "online_filtering": False,
-            "causal_credit_enabled": method == "cf_grpo",
             "semifactual_enabled": method == "scapo",
             "semifactual_lambda": 0.01,
             "semifactual_n_steps": 60 if size == "4b" else 100,
@@ -60,7 +60,7 @@ def build_config(method, size, *, model_path=None, output_dir=None, gpus=8, max_
                 "clip_ratio_low": 3e-4 if method == "gspo" else 0.2,
                 "clip_ratio_high": 4e-4 if method == "gspo" else 0.28,
                 "clip_ratio_dual": 10.0,
-                "loss_type": {"grpo": "default", "cf_grpo": "default", "scapo": "default", "gspo": "gspo_token"}.get(method, method),
+                "loss_type": {"grpo": "default", "scapo": "default", "gspo": "gspo_token"}.get(method, method),
                 "loss_avg_mode": "token",
                 "ppo_epochs": 1,
                 "tau_positive": 1.0,
@@ -186,7 +186,10 @@ def main():
         raise FileExistsError(f"Use an empty output directory: {output}")
     output.mkdir(parents=True, exist_ok=True)
     config_path = output / "config.yaml"
-    OmegaConf.save(config, config_path)
+    config_path.write_text(
+        yaml.safe_dump(OmegaConf.to_container(config, resolve=False, enum_to_str=True), allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
     (output / "runtime_versions.json").write_text(json.dumps(runtime_versions(), indent=2) + "\n")
     print(
         f"{args.method} / {args.size}: {config.trainer.max_steps} rollout steps, "

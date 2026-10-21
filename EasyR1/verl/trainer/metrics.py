@@ -22,11 +22,7 @@ from ..protocol import DataProto
 _FIPO_DIAGNOSTIC_NAMES = (
     "valid_count",
     "future_kl_sum",
-    "future_kl_min",
-    "future_kl_max",
     "influence_weight_sum",
-    "influence_weight_min",
-    "influence_weight_max",
     "upper_clip_count",
     "lower_clip_count",
     "extreme_filter_count",
@@ -54,22 +50,6 @@ def _reduce_fipo_diagnostics(
         reduced["actor/fipo_influence_weight_mean"] = ratio(
             float(np.sum(metrics[keys["influence_weight_sum"]])), valid_count
         )
-        nonempty = valid_counts > 0
-        if np.any(nonempty):
-            reduced["actor/fipo_future_kl_min"] = float(np.min(np.asarray(metrics[keys["future_kl_min"]])[nonempty]))
-            reduced["actor/fipo_future_kl_max"] = float(np.max(np.asarray(metrics[keys["future_kl_max"]])[nonempty]))
-            reduced["actor/fipo_influence_weight_min"] = float(
-                np.min(np.asarray(metrics[keys["influence_weight_min"]])[nonempty])
-            )
-            reduced["actor/fipo_influence_weight_max"] = float(
-                np.max(np.asarray(metrics[keys["influence_weight_max"]])[nonempty])
-            )
-        else:
-            reduced["actor/fipo_future_kl_min"] = 0.0
-            reduced["actor/fipo_future_kl_max"] = 0.0
-            reduced["actor/fipo_influence_weight_min"] = 0.0
-            reduced["actor/fipo_influence_weight_max"] = 0.0
-
         reduced["actor/fipo_influence_clipfrac_upper"] = ratio(
             float(np.sum(metrics[keys["upper_clip_count"]])), valid_count
         )
@@ -94,9 +74,6 @@ def reduce_metrics(metrics: dict[str, list[Any]]) -> dict[str, Any]:
     clip_count_keys = {
         "high": "actor/pg_clip_high_count",
         "low": "actor/pg_clip_low_count",
-        "positive": "actor/adv_positive_count",
-        "negative": "actor/adv_negative_count",
-        "zero": "actor/adv_zero_count",
         "valid": "actor/pg_valid_token_count",
     }
     eps = 1.0e-12
@@ -104,13 +81,6 @@ def reduce_metrics(metrics: dict[str, list[Any]]) -> dict[str, Any]:
     if all(key in metrics for key in clip_count_keys.values()):
         counts = {name: float(np.sum(metrics[key])) for name, key in clip_count_keys.items()}
         reduced["actor/pg_clipfrac_higher"] = (counts["high"] + counts["low"]) / (counts["valid"] + eps)
-        reduced["actor/pg_clipfrac_high"] = counts["high"] / (counts["valid"] + eps)
-        reduced["actor/pg_clipfrac_low"] = counts["low"] / (counts["valid"] + eps)
-        reduced["actor/pg_clipfrac_high_given_positive"] = counts["high"] / (counts["positive"] + eps)
-        reduced["actor/pg_clipfrac_low_given_negative"] = counts["low"] / (counts["negative"] + eps)
-        reduced["actor/adv_positive_frac"] = counts["positive"] / (counts["valid"] + eps)
-        reduced["actor/adv_negative_frac"] = counts["negative"] / (counts["valid"] + eps)
-        reduced["actor/adv_zero_frac"] = counts["zero"] / (counts["valid"] + eps)
 
     for key in clip_count_keys.values():
         reduced.pop(key, None)
